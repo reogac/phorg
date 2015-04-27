@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 from PIL import Image
 #from PIL.ExifTags import TAGS
 
@@ -13,6 +14,12 @@ class PhorgError(Exception):
         return repr(self.__message)
 
 class Phorg:
+    FILE_PHOTO = 0
+    FILE_VIDEO = 1
+    FILE_PHOTO_ERROR = 2
+    FILE_VIDEO_ERRO = 3
+    FILE_ERROR = -1
+
     IMAGE_EXTS = ['.jpg', '.gif', '.tiff', '.png']
     VIDEO_EXTS = ['.mp4', '.mov', '.3gp']
     DATETIME_PATTERNS =[
@@ -21,18 +28,22 @@ class Phorg:
     def __init__(self, args):
         self.__args = args
         self.__file_list = []
+        self.__photo_dir = None
+        self.__video_dir = None
+        self.__perror_dir = None
+        self.__verror_dir = None
 
-    def __process_file(self, afile):
+    def __handle_file(self, afile):
         file_path = os.path.abspath(afile)
         file_name = os.path.split(file_path)[-1]
         file_ext = os.path.splitext(file_name)[-1].lower()
-        print afile
+        #print afile
         if file_ext in Phorg.IMAGE_EXTS:
             self.__handle_image(afile)
-        elif file_ext in Phorg.VIDEO_EXTS:
+        elif self.__args.video and file_ext in Phorg.VIDEO_EXTS:
             self.__handle_video(afile)
         else:
-            self.__handle_unexpected_file(afile)
+            self.__handle_unexpected_file(afile, Phorg.FILE_ERROR)
 
     def __get_datetime_from_file_name(self, file_name):
         for p1, p2 in Phorg.DATETIME_PATTERNS:
@@ -60,13 +71,20 @@ class Phorg:
                 return datetime.strptime(ts,"%Y:%m:%d %H:%M:%S")
             except:
                 pass
-
-        except OSError as e:
-            print e
+        except:
             pass
 
-    def __handle_unexpected_file(self, afile):
-        print afile, "is not is not processed"
+    def __get_year(self, time):
+        return str(time.year)
+
+    def __get_month(self, time):
+        return str(time.month)
+
+    def __handle_unexpected_file(self, afile, file_type):
+        if file_type == Phorg.FILE_ERROR:
+            print afile, "is not is not processed"
+        else:
+            self.__to_dest(afile, file_type, None)
 
     def __handle_image(self, img_file):
         t = None
@@ -76,7 +94,9 @@ class Phorg:
         if not t:
             t = self.__get_datetime_from_file_attributes(img_file)
         if t:
-            print t
+            self.__to_dest(img_file, Phorg.FILE_PHOTO, t)
+        else:
+            self.__handle_unexpected_file(img_file, Phorg.FILE_PHOTO_ERROR)
 
     def __handle_video(self, video_file):
         t = None
@@ -84,10 +104,45 @@ class Phorg:
         if not t:
             t = self.__get_datetime_from_file_attributes(video_file)
         if t:
-            print t
+            self.__to_dest(video_file, Phorg.FILE_VIDEO, t)
+        else:
+            self.__handle_unexpected_file(video_file, Phorg.FILE_VIDEO_ERRO)
 
+    def __to_dest(self, file_path, file_type, time):
+        dest_prefix = None
+        if file_type == Phorg.FILE_PHOTO:
+            dest_prefix = self.__photo_dir
+        elif file_type == Phorg.FILE_VIDEO:
+            dest_prefix = self.__video_dir
+        elif file_type == Phorg.FILE_PHOTO_ERROR:
+            dest_prefix = self.__perror_dir
+        else:
+            dest_prefix = self.__verror_dir
+        if file_type in [Phorg.FILE_PHOTO, Phorg.FILE_VIDEO]:
+            year = self.__get_year(time)
+            month = self.__get_month(time)
+            dest_prefix = dest_prefix + '/' + year
+            if not os.path.exists(dest_prefix):
+                os.makedirs(dest_prefix)
+            dest_prefix = dest_prefix + '/' + month
+            if not os.path.exists(dest_prefix):
+                os.makedirs(dest_prefix)
 
-    def process(self):
+        file_full_name = os.path.split(file_path)[-1]
+        file_name,file_ext = os.path.splitext(file_full_name)
+        cnt = 1
+        dest_path = dest_prefix + '/' + file_full_name
+        while os.path.exists(dest_path):
+            dest_path = dest_prefix + '/' + file_name + '(' + str(cnt) + ')' + file_ext
+            cnt += 1
+        if self.__args.dry:
+            print 'copy {} to {}'.format(file_path, dest_path)
+        elif self.__args.copy:
+            shutil.copy(file_path, dest_path)
+        else:
+            os.rename(file_path, dest_path)
+
+    def __check_dirs(self):
         self.__args.src_dir = os.path.abspath(self.__args.src_dir)
         self.__args.dest_dir = os.path.abspath(self.__args.dest_dir.rstrip('/\\'))
 
@@ -97,9 +152,32 @@ class Phorg:
         if os.path.commonprefix([self.__args.src_dir, self.__args.dest_dir]) == self.__args.src_dir:
             raise PhorgError("{} is a subfolder of the source".format(self.__args.dest_dir))
 
-        if not os.path.exists(self.__args.dest_dir) :
-            os.makedirs(self.__args.dest_dir)
+    def __create_dest_dir(self):
+        try:
+            self.__photo_dir = self.__args.dest_dir
+            self.__video_dir = self.__photo_dir
+            if not os.path.exists(self.__photo_dir) :
+                os.makedirs(self.__photo_dir)
+            if self.__args.separate:
+                self.__video_dir = self.__photo_dir + "/videos"
+                self.__photo_dir = self.__photo_dir + "/photos"
 
+                if not os.path.exists(self.__photo_dir) :
+                    os.makedirs(self.__photo_dir)
+                if not os.path.exists(self.__video_dir) :
+                    os.makedirs(self.__video_dir)
+            self.__perror_dir = self.__photo_dir + "/nodate"
+            self.__verror_dir = self.__video_dir + "/nodate"
+            if not os.path.exists(self.__perror_dir):
+                os.makedirs(self.__perror_dir)
+            if self.__args.separate and not os.path.exists(self.__verror_dir):
+                os.makedirs(self.__verror_dir)
+        except Exception as e:
+            raise PhorgError(str(e))
+
+    def process(self):
+        self.__check_dirs()
+        self.__create_dest_dir()
         dir_list = [self.__args.src_dir]
         self.__file_list = []
         while len(dir_list)>0:
@@ -107,7 +185,7 @@ class Phorg:
             for afile in os.listdir(cur_dir):
                 afile = os.path.join(cur_dir, afile)
                 if os.path.isfile(afile):
-                    self.__process_file(afile)
+                    self.__handle_file(afile)
                 elif self.__args.recursive and os.path.isdir(afile):
                     dir_list.append(afile)
 
@@ -124,12 +202,6 @@ def main():
     parser.add_argument("-t", "--use-ctime", dest="ctime", help="use file created time", action="store_true")
     args = parser.parse_args()
 
-    print "source folder = ", args.src_dir
-    print "target folder = ", args.dest_dir
-    print "is recursive = ", args.recursive
-    print "is process videos = ", args.video
-    print "is verbose = ", args.verbose
-    print "is dry run = ", args.dry
     try:
         phorg = Phorg(args)
         phorg.process()
