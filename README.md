@@ -2,7 +2,7 @@
 
 Phorg is a simple command line tool for organizing your photos into year/month folders.
 
-First it reads exif metadata to find the photo taken time. If the information is not available, it try to search in file name (onedrive, dropbox camera upload apps normally have this timestamp in file names). If neither methods work, it can optionally take the file created time as the timestamp.
+First it reads exif metadata to find the photo taken time. If the information is not available, it try to search in file name (onedrive camera upload normally have this timestamp in file names). If neither methods work, it can optionally take the file created time as the timestamp.
 
 Photos/videos with known timestamp are put in year/month folders. Month names can be defined with '-m MONTHS' option.
 
