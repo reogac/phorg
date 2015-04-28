@@ -28,7 +28,7 @@ It also needs pyprind to display copying progression.
                             file name can reveal the photo taken time
       -o, --overwrite       overwriting existing files
       -m MONTHS, --months MONTHS
-                            a string of namesseparated by commas that be used as
+                            a string of names separated by commas that be used as
                             month directories,or 'system' (default) for using
                             system month names,or 'number' for using month number
                             as names,
