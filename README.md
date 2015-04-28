@@ -10,11 +10,11 @@ Photos/videos with known timestamp are put in year/month folders. Month names ca
 Phorg uses PIL for reading photo exif tags.
 It also needs pyprind to display copying progression. pyprind in turn need psutil
 
-   sudo pip install PIL
-   
-   sudo pip install psutil
-   
-   sudo pip install pyprind
+    sudo pip install PIL
+    
+    sudo pip install psutil
+    
+    sudo pip install pyprind
 
 #Usage
 
