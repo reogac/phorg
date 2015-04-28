@@ -1,33 +1,30 @@
 import argparse
+import calendar
 import os
 import shutil
-from PIL import Image
-#from PIL.ExifTags import TAGS
-
-from datetime import datetime
 import re
+import pyprind
+from PIL import Image
+from datetime import datetime
 
 FILE_PHOTO = 0
 FILE_VIDEO = 1
-FILE_PHOTO_ERROR = 2
-FILE_VIDEO_ERRO = 3
 
 IMAGE_EXTS = ['.jpg', '.gif', '.tiff', '.png']
 VIDEO_EXTS = ['.mp4', '.mov', '.3gp']
+
 DATETIME_PATTERNS =[
-    ('[0-9]{4}[ -_.:]?[0-9]{2}[ -_.:]?\
-     [0-9]{2}[ -_.:]?[0-9]{2}[ -_.:]?\
-     [0-9]{2}[ -_.:]?[0-9]{2}'
-     ,'%Y%m%d%H%M%S'),
+    ('[0-9]{4}[ -_.:]?[0-9]{2}[ -_.:]?[0-9]{2}[ -_.:]?[0-9]{2}[ -_.:]?'
+     '[0-9]{2}[ -_.:]?[0-9]{2}',
+     '%Y%m%d%H%M%S'),
 ]
 
-_args = None
-_file_list = []
-_photo_dir = None
-_video_dir = None
-_perror_dir = None
-_verror_dir = None
-_newest_time = None
+args = None
+file_list = []
+photo_dir = None
+video_dir = None
+perror_dir = None
+verror_dir = None
 
 class PhorgError(Exception):
     def _init_(self, msg):
@@ -35,42 +32,35 @@ class PhorgError(Exception):
     def _str_(self):
         return repr(self.__message)
 
-def _get_time(s):
-    """
-    Returns datetime from a string
-    """
-    for p1, p2 in DATETIME_PATTERNS:
-        m = re.search(p1, s)
-        if m:
-            ts = []
-            for c in m.group(0):
-                if c not in ' -_.:':
-                    ts.append(c)
-            return datetime.strptime(''.join(ts)[0:14], p2)
 
-
-def _get_datetime_from_file_name(file_name):
+def get_datetime_from_file_name(file_name):
     """
     Returns datetime from a file name
     """
     try:
-        return _get_time(file_name)
+        for p1, p2 in DATETIME_PATTERNS:
+            m = re.search(p1, file_name)
+            if m:
+                ts = []
+                for c in m.group(0):
+                    if c not in ' -_.:':
+                        ts.append(c)
+                return datetime.strptime(''.join(ts)[0:14], p2)
     except:
         pass
 
-def _get_datetime_from_file_attributes( afile):
+def get_datetime_from_file_attributes(afile):
     """
     Returns the created time by reading file attributes
     """
 
-    if _args.ctime:
+    if args.ctime:
         return datetime.fromtimestamp(os.path.getctime(afile))
 
-def _get_datetime_from_exif( img_file):
+def get_datetime_from_exif(img_file):
     """
     Returns photo taken time from EXIF meta data
     """
-
     try:
         i = Image.open(img_file)
         ts = i._getexif().get(0x9003, '')
@@ -78,191 +68,229 @@ def _get_datetime_from_exif( img_file):
     except:
         pass
 
-def _get_year( time):
+def get_year(time):
     """
-    Returns the year of a datetime input
+    Returns the year from a datetime object
     """
+    if args.year:
+        return args.year + ' ' + str(time.year)
     return str(time.year)
 
-def _get_month( time):
-    """ Returns the month of a datetime input
+def get_month(time):
     """
+    Returns the month of a datetime input
+    """
+    return args.months[time.month-1]
 
-    return str(time.month)
-
-def _get_image_time( img_file):
+def get_image_time(img_file):
     t = None
-    t = _get_datetime_from_exif(img_file)
+    t = get_datetime_from_exif(img_file)
     if not t:
-        t = _get_datetime_from_file_name(img_file)
-    if not t and _args.ctime:
-        t = _get_datetime_from_file_attributes(img_file)
+        t = get_datetime_from_file_name(img_file)
+    if not t and args.ctime:
+        t = get_datetime_from_file_attributes(img_file)
     return t
 
-def _get_video_time( video_file):
-
+def get_video_time(video_file):
     t = None
-    t = _get_datetime_from_file_name(video_file)
-    if not t and _args.ctime:
-        t = _get_datetime_from_file_attributes(video_file)
+    t = get_datetime_from_file_name(video_file)
+    if not t and args.ctime:
+        t = get_datetime_from_file_attributes(video_file)
     return t
 
 
 def process():
-    _check_dirs()
-    _create_dest_dir()
-    _collect_files()
-    _process_files()
+    check_dirs()
+    create_dest_dir()
+    collect_files()
+    process_files()
 
-def _check_dirs():
+def check_dirs():
     """
     Checks for the validity of the source and target directories
     """
-    _args.src_dir = os.path.abspath(_args.src_dir)
-    _args.dest_dir = os.path.abspath(_args.dest_dir.rstrip('/\\'))
+    args.src_dir = os.path.abspath(args.src_dir)
+    args.dest_dir = os.path.abspath(args.dest_dir.rstrip('/\\'))
 
-    if not os.path.isdir(_args.src_dir):
-        raise PhorgError("{} is not a directory".format(_args.src_dir))
+    if not os.path.isdir(args.src_dir):
+        raise PhorgError("{} is not a directory".format(args.src_dir))
 
-    if os.path.commonprefix([_args.src_dir, _args.dest_dir]) == _args.src_dir:
+    if os.path.commonprefix([args.src_dir, args.dest_dir]) == args.src_dir:
         raise PhorgError("{} is a subfolder of the source".
-                         format(_args.dest_dir))
+                         format(args.dest_dir))
 
-def _create_dest_dir(self):
+def create_dest_dir():
     """
     Creates the target directory and its subditectories
     """
+    global photo_dir, video_dir, perror_dir, verror_dir
     try:
-        _photo_dir = _args.dest_dir
-        _video_dir = _photo_dir
-        if not os.path.exists(_photo_dir) :
-            os.makedirs(_photo_dir)
-            if _args.separate:
-                _video_dir = _photo_dir + "/videos"
-                _photo_dir = _photo_dir + "/photos"
+        photo_dir = args.dest_dir
+        video_dir = photo_dir
+        if not os.path.exists(photo_dir) :
+            os.makedirs(photo_dir)
+        if args.separate:
+            video_dir = photo_dir + "/videos"
+            photo_dir = photo_dir + "/photos"
 
-            if not os.path.exists(_photo_dir) :
-                os.makedirs(_photo_dir)
-                if not os.path.exists(_video_dir) :
-                    os.makedirs(_video_dir)
-                    _perror_dir = _photo_dir + "/nodate"
-                    _verror_dir = _video_dir + "/nodate"
-                    if not os.path.exists(_perror_dir):
-                        os.makedirs(_perror_dir)
-                        if _args.separate\
-                            and not os.path.exists(_verror_dir):
-                            os.makedirs(_verror_dir)
+        if not os.path.exists(photo_dir) :
+            os.makedirs(photo_dir)
+        if not os.path.exists(video_dir) :
+            os.makedirs(video_dir)
+
+        perror_dir = photo_dir + "/nodate"
+        verror_dir = video_dir + "/nodate"
+        if not os.path.exists(perror_dir):
+            os.makedirs(perror_dir)
+        if args.separate and not os.path.exists(verror_dir):
+            os.makedirs(verror_dir)
     except Exception as e:
         raise PhorgError(str(e))
 
-def _collect_files(self):
+def collect_files():
     """
     Collects files in source directory for moving/copying
     """
-
-    dir_list = [_args.src_dir]
-    _file_list = []
+    global file_list
+    dir_list = [args.src_dir]
+    file_list = []
     while len(dir_list)>0:
         cur_dir = dir_list.pop()
         for afile in os.listdir(cur_dir):
             afile = os.path.join(cur_dir, afile)
             if os.path.isfile(afile):
-                attributes = _read_file(afile)
+                attributes = read_file(afile)
                 if attributes:
-                    _file_list.append(attributes)
-            elif _args.recursive and os.path.isdir(afile):
+                    file_list.append(attributes)
+            elif args.recursive and os.path.isdir(afile):
                 dir_list.append(afile)
 
-def _read_file( afile):
+def read_file(afile):
     file_path = os.path.abspath(afile)
     file_name = os.path.split(file_path)[-1]
     file_ext = os.path.splitext(file_name)[-1].lower()
     t = None
     file_type = None
     if file_ext in IMAGE_EXTS:
-        t = _get_image_time(afile)
+        t = get_image_time(afile)
         file_type = FILE_PHOTO
-    elif _args.video and file_ext in VIDEO_EXTS:
-        t = _get_video_time(afile)
+    elif args.video and file_ext in VIDEO_EXTS:
+        t = get_video_time(afile)
         file_type = FILE_VIDEO
     else:
-        _handle_unexpected_file(afile)
+        handle_unexpected_file(afile)
+        return
+    if args.overwrite:
+        return (afile, file_type, t)
 
-    if not file_exists(afile, file_type, t):
-        return (afile, t)
+    file_size = os.path.getsize(file_path)
+    dest_prefix = get_prefix(file_type, t)
+    if t:
+        dest_prefix = dest_prefix + '/' + get_year(t) + '/' + get_month(t)
 
-def _get_prefix(file_type, t):
+    if not file_exists(dest_prefix, file_name, file_size):
+        return (afile, file_type, t)
+
+def get_prefix(file_type, t):
     ret = None
     if file_type == FILE_PHOTO:
         if t:
-            ret = _photo_dir
+            ret = photo_dir
         else:
-            ret = _perror_dir
+            ret = perror_dir
     elif file_type == FILE_VIDEO:
         if t:
-            ret = _video_dir
+            ret = video_dir
         else:
-            ret = _verror_dir
+            ret = verror_dir
 
-    if t:
-        year = _get_year(t)
-        month = _get_month(t)
-        ret = ret + '/' + year + '/' + month
     return ret
 
-def file_exists(file_path, file_type, t):
-    file_full_name = os.path.split(file_path)[-1]
-    file_name,file_ext = os.path.splitext(file_full_name)
-    dest_prefix = _get_prefix(file_type, t)
-    dest_path = dest_prefix + '/' + file_full_name
-    file_size = os.path.getsize(file_path)
+def file_exists(prefix_path, file_name, file_size):
+    dest_path = prefix_path + '/' + file_name
     return os.path.exists(dest_path) and file_size==os.path.getsize(dest_path)
 
-def _process_files():
-    for afile, file_type, t in _file_list:
-        _copy_file(afile, t, file_type)
-    pass
-def _copy_file(file_path, file_type, t):
-    pass
+def process_files():
+    n = len(file_list)
+    if n==0:
+        print "Nothing to process"
+        return
+    if not args.dry:
+        title = "Moving files"
+        if args.copy:
+            title = "Copying files"
+        bar = pyprind.ProgBar(n, monitor=True, title=title)
+    for i in range(n):
+        afile, file_type, t = file_list[i]
+        copy_file(afile, file_type, t)
+        if not args.dry:
+            bar.update()
 
-def _handle_unexpected_file( afile):
-    print afile, "is not is not processed"
-
-def _to_dest( file_path, file_type, time):
-    dest_prefix = None
-    if file_type == FILE_PHOTO:
-        dest_prefix = _photo_dir
-    elif file_type == FILE_VIDEO:
-        dest_prefix = _video_dir
-    elif file_type == FILE_PHOTO_ERROR:
-        dest_prefix = _perror_dir
-    else:
-        dest_prefix = _verror_dir
-        if file_type in [FILE_PHOTO, FILE_VIDEO]:
-            year = _get_year(time)
-            month = _get_month(time)
-            dest_prefix = dest_prefix + '/' + year
-            if not os.path.exists(dest_prefix):
-                os.makedirs(dest_prefix)
-                dest_prefix = dest_prefix + '/' + month
-                if not os.path.exists(dest_prefix):
-                    os.makedirs(dest_prefix)
-
+def copy_file(file_path, file_type, t):
+    dest_prefix = get_prefix(file_type, t)
     file_full_name = os.path.split(file_path)[-1]
     file_name,file_ext = os.path.splitext(file_full_name)
+    file_size = os.path.getsize(file_path)
+    dest_ext = ""
+    if t:
+        year = get_year(t)
+        month = get_month(t)
+        dest_ext = '/' + year + '/' + month
+
     cnt = 1
-    dest_path = dest_prefix + '/' + file_full_name
-    while os.path.exists(dest_path):
-        dest_path = dest_prefix + '/' + file_name + '(' + str(cnt) + ')' + file_ext
-        cnt += 1
-        if _args.dry:
-            print 'copy {} to {}'.format(file_path, dest_path)
-        elif _args.copy:
-            shutil.copy(file_path, dest_path)
-        else:
-            os.rename(file_path, dest_path)
+    if not args.overwrite:
+        while file_exists(dest_prefix + dest_ext,
+                          file_full_name,
+                          file_size):
+            file_full_name = file_name + '(' + str(cnt) + ')' + file_ext
+            cnt += 1
+
+    dest_path = dest_prefix
+    if t:
+        dest_path = dest_prefix + '/' + year
+        if not os.path.exists(dest_path):
+            os.makedirs(dest_path)
+        dest_path = dest_path + '/' + month
+        if not os.path.exists(dest_path):
+            os.makedirs(dest_path)
+
+    dest_path = dest_path + '/' + file_full_name
+
+    if args.dry:
+        print 'copy {} to {}'.format(file_path, dest_path)
+    elif args.copy:
+        shutil.copy(file_path, dest_path)
+    else:
+        os.rename(file_path, dest_path)
+
+def handle_unexpected_file(afile):
+    if args.verbose:
+        print afile, "is not is not processed"
+
+def get_months(s):
+    ret = s.split(",")
+    if len(ret) == 1:
+        if ret[0].lower() == "system":
+            return get_system_months()
+        if ret[0].lower() == "number":
+            return get_number_months()
+    if len(ret) != 12:
+        raise PhorgError("We needs exactly 12 months")
+    return ret
+
+def get_system_months():
+    ret = []
+    for i in range(1,13):
+        ret.append(calendar.month_name[i])
+    return ret
+def get_number_months():
+    ret =[]
+    for i in range(1,13):
+        ret.append(str(i))
+    return ret
 
 def main():
+    global args
     parser = argparse.ArgumentParser(description="A simple photo organizer")
     parser.add_argument("src_dir", help="photo directory")
     parser.add_argument("dest_dir", help="target directory")
@@ -284,8 +312,18 @@ def main():
     parser.add_argument("-a", "--all", dest="all",
                         help="process all files, include old ones",
                         action="store_false")
+    parser.add_argument("-o", "--overwrite", dest="overwrite",
+                        help="overwriting existing files", action="store_true")
+
+    parser.add_argument("-m", "--months", dest="months", help="a string of names"
+                        "separated by spaces that be used as month directories,"
+                        "or \'system\' for using system month names,"
+                        "or \'number\' for using month number as names, ",
+                       type=get_months, default="system")
+    parser.add_argument("-y", "--year-prefix",
+                        help="prefix for name of year directory", dest="year")
+
     args = parser.parse_args()
-    print args.newest
     try:
         process()
     except PhorgError as e:
