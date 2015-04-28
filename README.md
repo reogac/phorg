@@ -11,9 +11,7 @@ Phorg uses PIL for reading photo exif tags.
 It also needs pyprind to display copying progression. pyprind in turn need psutil
 
     sudo pip install PIL
-    
     sudo pip install psutil
-    
     sudo pip install pyprind
 
 #Usage
